@@ -1,0 +1,33 @@
+name: Daily Kakao English Message
+
+on:
+  schedule:
+    # 매일 23:30 UTC = 08:30 KST (월~금 발송, 0=일 ~ 4=목 => 다음날 KST 월~금)
+    - cron: "30 23 * * 0-4"
+  workflow_dispatch: {}  # 수동 실행 버튼으로 즉시 테스트 가능
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: 오늘의 표현 발송
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
+        run: python send_message.py
+
+      - name: 발송 상태 저장 (state.json 커밋)
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add state.json
+          git commit -m "update sent state" || echo "변경 사항 없음"
+          git push

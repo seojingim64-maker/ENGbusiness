@@ -4,13 +4,16 @@
 
 동작 방식:
 - expressions.json 에 담긴 22개 표현 중, 오늘 순번에 해당하는 "1개"만 골라서 발송
-- List 템플릿을 사용: 헤더에 핵심 표현+뜻, 리스트 5칸에 예문 5개
-  (각 예문 항목을 누르면 해당 표현이 나오는 영상 시점으로 바로 이동)
+- 표현+뜻+예문 5개가 전부 그려진 "카드 이미지"(docs/day-XX.png)를 통째로 전송
+  (텍스트 필드 대신 이미지로 보내서 카카오 템플릿의 글자수/줄수 제한을 우회)
 - 22개를 다 보내면 다시 처음(1번)부터 순환
 
 필요한 환경변수 (GitHub Secrets에 등록):
   KAKAO_REST_API_KEY  - 카카오 개발자 앱의 REST API 키
   KAKAO_REFRESH_TOKEN - 최초 1회 발급받은 리프레시 토큰
+  PAGES_BASE_URL       - (선택) GitHub Pages 기본 주소.
+                          예: https://seojingim64-maker.github.io/ENGbusiness
+                          설정 안 하면 아래 기본값 사용
 """
 import os
 import json
@@ -18,11 +21,29 @@ import requests
 
 REST_API_KEY = os.environ["KAKAO_REST_API_KEY"]
 REFRESH_TOKEN = os.environ["KAKAO_REFRESH_TOKEN"]
+PAGES_BASE_URL = os.environ.get(
+    "PAGES_BASE_URL", "https://seojingim64-maker.github.io/ENGbusiness"
+).rstrip("/")
 
 TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 SEND_URL = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
 STATE_FILE = "state.json"
 DATA_FILE = "expressions.json"
+CARD_SIZES_FILE = "docs/card_sizes.json"
+
+
+def load_card_size(day_no: int) -> tuple:
+    """카드 이미지의 실제 가로/세로 픽셀 크기를 읽어온다 (없으면 기본값)."""
+    key = f"{day_no:02d}"
+    try:
+        with open(CARD_SIZES_FILE, "r", encoding="utf-8") as f:
+            sizes = json.load(f)
+        size = sizes.get(key)
+        if size:
+            return size["width"], size["height"]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+    return 900, 1200  # 기본값 (파일을 못 찾을 경우 대비)
 
 
 def get_access_token() -> str:
@@ -58,31 +79,30 @@ def format_timestamp(seconds: int) -> str:
 
 
 def build_message(item: dict, day_no: int, total: int) -> dict:
-    link_url = f"https://youtu.be/{item['video_id']}?t={item['timestamp_seconds']}"
-    thumbnail = f"https://img.youtube.com/vi/{item['video_id']}/hqdefault.jpg"
+    video_link = f"https://youtu.be/{item['video_id']}?t={item['timestamp_seconds']}"
+    # 표현+뜻+예문 5개가 전부 그려진 카드 이미지 (docs/day-XX.png, 미리 생성해둔 정적 이미지)
+    card_image = f"{PAGES_BASE_URL}/day-{day_no:02d}.png"
     ts = format_timestamp(item["timestamp_seconds"])
-    link = {"web_url": link_url, "mobile_web_url": link_url}
+    card_w, card_h = load_card_size(day_no)
 
-    header_title = f"[Day {day_no}/{total}] {item['core_expression']} · 👉 {item['meaning_kr']}"
-
-    contents = []
-    for i, example in enumerate(item["examples"][:5], start=1):
-        contents.append(
-            {
-                "title": f"예문 {i}",
-                "description": example,
-                "image_url": thumbnail,
-                "link": link,
-            }
-        )
+    title = f"[Day {day_no}/{total}] {item['core_expression']}"
+    description = f"👉 {item['meaning_kr']}"
 
     template_object = {
-        "object_type": "list",
-        "header_title": header_title,
-        "header_link": link,
-        "contents": contents,
+        "object_type": "feed",
+        "content": {
+            "title": title,
+            "description": description,
+            "image_url": card_image,
+            "image_width": card_w,
+            "image_height": card_h,
+            "link": {"web_url": video_link, "mobile_web_url": video_link},
+        },
         "buttons": [
-            {"title": f"영상에서 보기 ({ts}~)", "link": link}
+            {
+                "title": f"🎬 영상에서 보기 ({ts}~)",
+                "link": {"web_url": video_link, "mobile_web_url": video_link},
+            },
         ],
     }
     return template_object
